@@ -3,6 +3,7 @@ const { simpleParser } = require('mailparser');
 const axios = require('axios');
 const { imap, externalApi } = require('../config/env');
 const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
+const { parseEmailContent } = require('../utils/emailParser');
 
 const notifier = new MailNotifier({
     user: imap.user,
@@ -12,26 +13,21 @@ const notifier = new MailNotifier({
     tls: imap.port === 993,
 });
 
+
 const processEmail = async (email) => {
     try {
         const parsed = await simpleParser(email.text);
-        const textBody = parsed.text || '';
+        const { text: textBody } = parsed;
 
-        const idMatch = textBody.match(/id\s*:\s*(\d+)/);
-        const commentMatch = textBody.match(/Комментарий\s*:\s*(.*?)(?:\n|$)/);
-        const approvedMatch = textBody.match(/approved\s*:\s*(true|false)/);
+        const { id, comment, approved } = parseEmailContent(textBody);
 
-        const messageId = idMatch ? idMatch[1] : null;
-        const comment = commentMatch ? commentMatch[1].trim() : '';
-        const approved = approvedMatch ? approvedMatch[1] === 'true' : false;
+        logEmailParsing({ id, comment, approved });
 
-        logEmailParsing({ messageId, comment, approved });
-
-        if (messageId) {
+        if (id) {
             const requestBody = {
-                id: messageId,
-                approved: approved,
-                comment: comment,
+                id,
+                approved,
+                comment,
             };
             const headers = {
                 Authorization: `Bearer ${externalApi.token}`,

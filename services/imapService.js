@@ -3,31 +3,39 @@ const { simpleParser } = require('mailparser');
 const axios = require('axios');
 const { imap, externalApi } = require('../config/env');
 const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
-const { parseEmailContent } = require('../utils/emailParser');
 
-const notifier = new MailNotifier({
-    user: imap.user,
-    password: imap.pass,
-    host: imap.host,
-    port: imap.port,
-    tls: imap.port === 993,
-});
+let notifier;
 
+const createNotifier = () => {
+    return new MailNotifier({
+        user: imap.user,
+        password: imap.pass,
+        host: imap.host,
+        port: imap.port,
+        tls: imap.port === 993,
+    });
+};
 
 const processEmail = async (email) => {
     try {
         const parsed = await simpleParser(email.text);
-        const { text: textBody } = parsed;
+        const textBody = parsed.text || '';
 
-        const { id, comment, approved } = parseEmailContent(textBody);
+        const idMatch = textBody.match(/id\s*:\s*(\d+)/);
+        const commentMatch = textBody.match(/Комментарий\s*:\s*(.*?)(?:\n|$)/);
+        const approvedMatch = textBody.match(/approved\s*:\s*(true|false)/);
 
-        logEmailParsing({ id, comment, approved });
+        const messageId = idMatch ? idMatch[1] : null;
+        const comment = commentMatch ? commentMatch[1].trim() : '';
+        const approved = approvedMatch ? approvedMatch[1] === 'true' : false;
 
-        if (id) {
+        logEmailParsing({ messageId, comment, approved });
+
+        if (messageId) {
             const requestBody = {
-                id,
-                approved,
-                comment,
+                id: messageId,
+                approved: approved,
+                comment: comment,
             };
             const headers = {
                 Authorization: `Bearer ${externalApi.token}`,
@@ -43,10 +51,23 @@ const processEmail = async (email) => {
     }
 };
 
-notifier.on('mail', processEmail);
-
 const startNotifier = () => {
-    notifier.start();
+    if (notifier) {
+        notifier.stop(); // Ensure to stop the old notifier instance
+    }
+
+    notifier = createNotifier();
+
+    notifier.on('mail', processEmail);
+    notifier.on('error', (error) => {
+        console.error('MailNotifier error:', error);
+    });
+
+    try {
+        notifier.start();
+    } catch (error) {
+        console.error('Failed to start notifier:', error);
+    }
 };
 
 module.exports = { startNotifier, processEmail };

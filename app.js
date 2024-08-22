@@ -3,6 +3,7 @@ const { logger } = require('./utils/logger');
 const { startNotifier } = require('./services/imapService');
 const { sendEmail, sendTaskClosureEmail } = require('./controllers/emailController');
 const { processEmails } = require('./controllers/imapController');
+const { setupConfig } = require('./controllers/setupConfigController');
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 app.post('/send-email', sendEmail);
 app.post('/send-task-closure-email', sendTaskClosureEmail);
 app.post('/process-emails', processEmails);
+app.post('/setup-config', setupConfig);
 
 // Health check routes
 app.get('/liveness', (req, res) => {

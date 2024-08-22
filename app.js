@@ -1,9 +1,12 @@
+require('dotenv').config();
 const express = require('express');
 const { logger } = require('./utils/logger');
 const { startNotifier } = require('./services/imapService');
 const { sendEmail, sendTaskClosureEmail } = require('./controllers/emailController');
 const { processEmails } = require('./controllers/imapController');
 const { setupConfig } = require('./controllers/setupConfigController');
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = process.env.NODE_TLS_REJECT_UNAUTHORIZED || '1';
+
 
 const app = express();
 

@@ -21,8 +21,8 @@ const processEmail = async (email) => {
         const parsed = await simpleParser(email.text);
         const textBody = parsed.text || '';
 
-        const idMatch = textBody.match(/id\s*:\s*(\d+)/);
-        const commentMatch = textBody.match(/Комментарий\s*:\s*(.*?)(?:\n|$)/);
+        const idMatch = textBody.match(/id\s*:\s*([a-zA-Z0-9-]+)/);
+        const commentMatch = textBody.match(/Комментарий\s*:\s*([\s\S]*?)\s*(?=id\s*:|approved\s*:|$)/);
         const approvedMatch = textBody.match(/approved\s*:\s*(true|false)/);
 
         const messageId = idMatch ? idMatch[1] : null;
@@ -53,7 +53,7 @@ const processEmail = async (email) => {
 
 const startNotifier = () => {
     if (notifier) {
-        notifier.stop(); // Ensure to stop the old notifier instance
+        notifier.stop();
     }
 
     notifier = createNotifier();

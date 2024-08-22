@@ -1,14 +1,48 @@
+const axios = require('axios');
+const crypto = require('crypto');
+const mime = require('mime-types');
 const transporter = require('../config/smtp');
 const { logExternalApiCall } = require('../utils/logger');
 
 exports.sendEmail = async (req, res) => {
     try {
-        const { recipient, type, register_number, comment, status, content, initiator, department, creation_date, id } = req.body;
+        const { recipient, type, register_number, comment, status, content, initiator, department, creation_date, id, download_urls } = req.body;
 
         if (!recipient || !type || !register_number || !status || !content || !initiator || !department || !creation_date || !id) {
             throw new Error('Missing required fields');
         }
 
+        const downloadFile = async (url) => {
+            try {
+                const response = await axios.get(url, { responseType: 'arraybuffer' });
+        
+                // Определение расширения файла из MIME-типа
+                const contentType = response.headers['content-type'];
+                const fileExtension = mime.extension(contentType) || 'dat'; // Устанавливаем расширение по умолчанию
+        
+                // Генерация уникального имени файла
+                const fileName = `file_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${fileExtension}`;
+        
+                const fileBuffer = Buffer.from(response.data, 'binary');
+        
+                return {
+                    filename: fileName,
+                    content: fileBuffer,
+                };
+            } catch (error) {
+                console.error(`Failed to download file from ${url}:`, error.message);
+                throw error;
+            }
+        };
+
+
+        let attachments = [];
+        if (download_urls && Array.isArray(download_urls) && download_urls.length > 0) {
+            for (const url of download_urls) {
+                const attachment = await downloadFile(url);
+                attachments.push(attachment);
+            }
+        }
         const mailOptions = {
             from: process.env.SMTP_USER,
             to: recipient,
@@ -27,18 +61,31 @@ exports.sendEmail = async (req, res) => {
                     <li>Дата создания: ${new Date(creation_date).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</li>
                 </ul>
                 <p>
-                    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ ${type} ${register_number} согласован. id=${id} approved=true"
+                    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ ${type} ${register_number} согласован.
+                    Комментарий:
+
+
+
+                    id:${id}
+                    approved:true"
                        style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
                        Согласовать
                     </a>
                 </p>
                 <p>
-                    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ ${type} ${register_number} требует доработок. id=${id} approved=false"
+                    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ ${type} ${register_number} требует доработок.
+                    Комментарий:
+
+
+
+                    id:${id}
+                    approved:false""
                        style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
                        Отправить замечания Инициатору
                     </a>
                 </p>
-            `
+            `,
+            attachments: attachments,
         };
 
         await transporter.sendMail(mailOptions);

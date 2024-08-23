@@ -8,7 +8,7 @@ exports.sendEmail = async (req, res) => {
     try {
         const { recipient, type, register_number, comment, status, content, initiator, department, creation_date, id, download_urls } = req.body;
 
-        if (!recipient || !type || !register_number || !status || !content || !initiator || !department || !creation_date || !id) {
+        if (!recipient || !type  || !status || !content || !initiator || !department || !creation_date || !id) {
             throw new Error('Missing required fields');
         }
 
@@ -46,14 +46,14 @@ exports.sendEmail = async (req, res) => {
         const mailOptions = {
             from: process.env.SMTP_USER,
             to: recipient,
-            subject: `Требуется Ваше согласование ${type} ${register_number}`,
+            subject: `Требуется Ваше согласование ${type} ${register_number ?? ''}`,
             html: `
-                <p>Требуется Ваше согласование ${type} ${register_number}</p>
+                <p>Требуется Ваше согласование ${type} ${register_number ?? ''}</p>
                 <p>Комментарий: ${comment || 'не указан'}</p>
                 <p>Текущий статус: ${status}</p>
                 <p>Краткая информация по документу:</p>
                 <ul>
-                    <li>Регистрационный номер: ${register_number}</li>
+                    <li>Регистрационный номер: ${register_number ?? ''}</li>
                     <li>Вид документа: ${type}</li>
                     <li>Инициатор: ${initiator}</li>
                     <li>Подразделение: ${department}</li>

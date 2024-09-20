@@ -1,16 +1,12 @@
 # Используем официальный образ Node.js
-FROM node:18
+FROM node:20
 
 # Создаем директорию для приложения
 WORKDIR /usr/src/app
 
 # Копируем package.json и package-lock.json
 COPY package*.json ./
-
-# Устанавливаем зависимости
-RUN npm install
-
-# Копируем все файлы проекта
+COPY node_modules ./node_modules
 COPY . .
 
 # Открываем порт, который будет использовать приложение

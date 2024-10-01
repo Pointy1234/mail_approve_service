@@ -1,5 +1,5 @@
 # Используем официальный образ Node.js
-FROM node:20
+FROM node:20-alpine
 
 # Создаем директорию для приложения
 WORKDIR /usr/src/app

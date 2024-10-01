@@ -20,7 +20,7 @@ const processEmail = async (email) => {
     try {
         const parsed = await simpleParser(email.text);
         const textBody = parsed.text || '';
-
+        let from = parsed.from
         const idMatch = textBody.match(/id\s*:\s*([a-zA-Z0-9-]+)/);
         const commentMatch = textBody.match(/Комментарий\s*:\s*([\s\S]*?)\s*(?=id\s*:|approved\s*:|$)/);
         const approvedMatch = textBody.match(/approved\s*:\s*(true|false)/);
@@ -33,6 +33,7 @@ const processEmail = async (email) => {
 
         if (messageId) {
             const requestBody = {
+                from: from,
                 id: messageId,
                 approved: approved,
                 comment: comment,

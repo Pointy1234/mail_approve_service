@@ -3,6 +3,7 @@ const { simpleParser } = require('mailparser');
 const axios = require('axios');
 const { imap, externalApi } = require('../config/env');
 const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
+const { text } = require('body-parser');
 
 let notifier;
 
@@ -16,24 +17,43 @@ const createNotifier = () => {
     });
 };
 
+// Функция для извлечения данных из текста письма
+function extractData(emailText) {
+    const idMatch = emailText.match(/id:\s*([\w-]+)/);
+    const approvedMatch = emailText.match(/approved:\s*(true|false)/);
+    const commentMatch = emailText.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/); // Извлечение комментария
+
+    const id = idMatch ? idMatch[1].trim() : null;
+    const approved = approvedMatch ? approvedMatch[1] === 'true' : null;
+    const comment = commentMatch ? commentMatch[1].trim() : null; // Текст комментария или null
+
+    return {
+        comment,
+        id,
+        approved
+    };
+}
+
+
+
 const processEmail = async (email) => {
     try {
-        const parsed = await simpleParser(email.text);
-        const textBody = parsed.text || '';
-        let from = parsed.from
-        const idMatch = textBody.match(/id\s*:\s*([a-zA-Z0-9-]+)/);
-        const commentMatch = textBody.match(/Комментарий\s*:\s*([\s\S]*?)\s*(?=id\s*:|approved\s*:|$)/);
-        const approvedMatch = textBody.match(/approved\s*:\s*(true|false)/);
+        const textBody = email.text;
+        console.log('email_text: ',email.text);
+        
+        //Извлекаем отправителя
+        const fromEmail = email.from[0].address || 'unknown';
 
-        const messageId = idMatch ? idMatch[1] : null;
-        const comment = commentMatch ? commentMatch[1].trim() : '';
-        const approved = approvedMatch ? approvedMatch[1] === 'true' : false;
+        // Извлекаем данные из текста письма
+        const { comment, id: messageId, approved } = extractData(textBody);
 
-        logEmailParsing({ messageId, comment, approved });
+        // Логируем процесс парсинга письма
+        logEmailParsing({ fromEmail, messageId, comment, approved });
 
+        // Отправляем данные на внешний API, если найден id
         if (messageId) {
             const requestBody = {
-                from: from,
+                from: fromEmail,
                 id: messageId,
                 approved: approved,
                 comment: comment,
@@ -45,12 +65,16 @@ const processEmail = async (email) => {
 
             logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
 
-            await axios.post(externalApi.url, requestBody, { headers });
-        }
+        await axios.post(externalApi.url, requestBody, { headers });
+         }
     } catch (error) {
         console.error('Failed to process email:', error);
     }
 };
+
+
+
+
 
 const startNotifier = () => {
     if (notifier) {

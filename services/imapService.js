@@ -9,13 +9,16 @@ let notifier;
 
 const createNotifier = () => {
     return new MailNotifier({
-        user: imap.user,
-        password: imap.pass,
-        host: imap.host,
-        port: imap.port,
-        tls: imap.port === 993,
+        user: process.env.IMAP_USER,
+        password: process.env.IMAP_PASS,
+        host: process.env.IMAP_HOST,
+        port: parseInt(process.env.IMAP_PORT, 10),
+        tls: true,
+        tlsOptions: { rejectUnauthorized: false },
+        debug: console.log
     });
 };
+
 
 // Функция для извлечения данных из текста письма
 function extractData(emailText) {
@@ -38,10 +41,20 @@ function extractData(emailText) {
 
 const processEmail = async (email) => {
     try {
-        const textBody = email.text;
-        console.log('email_text: ',email.text);
-        
-        //Извлекаем отправителя
+        // Используем text или html в зависимости от наличия данных
+        let textBody = email.text;
+
+        if (!textBody && email.html) {
+            // Если text отсутствует, используем html и преобразуем его в текст
+            const parsedEmail = await simpleParser(email.html);
+            textBody = parsedEmail.text; // Получаем текстовое представление из HTML
+        }
+
+        if (!textBody) return;
+
+        console.log('email_text:', textBody);
+
+        // Извлекаем отправителя
         const fromEmail = email.from[0].address || 'unknown';
 
         // Извлекаем данные из текста письма
@@ -51,22 +64,23 @@ const processEmail = async (email) => {
         logEmailParsing({ fromEmail, messageId, comment, approved });
 
         // Отправляем данные на внешний API, если найден id
-        if (messageId) {
-            const requestBody = {
-                from: fromEmail,
-                id: messageId,
-                approved: approved,
-                comment: comment,
-            };
-            const headers = {
-                Authorization: `Bearer ${externalApi.token}`,
-                'Content-Type': 'application/json',
-            };
+        // if (messageId) {
+        const requestBody = {
+            from: fromEmail,
+            id: messageId,
+            approved: approved,
+            comment: comment,
+            email: email
+        };
+        const headers = {
+            Authorization: `Bearer ${externalApi.token}`,
+            'Content-Type': 'application/json',
+        };
 
-            logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
+        logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
 
         await axios.post(externalApi.url, requestBody, { headers });
-         }
+        // }
     } catch (error) {
         console.error('Failed to process email:', error);
     }

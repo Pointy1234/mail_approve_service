@@ -4,7 +4,7 @@ const axios = require('axios');
 const { imap, externalApi } = require('../config/env');
 const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
 const { text } = require('body-parser');
-
+const cheerio = require('cheerio');
 let notifier;
 
 const createNotifier = () => {
@@ -22,9 +22,9 @@ const createNotifier = () => {
 
 // Функция для извлечения данных из текста письма
 function extractData(emailText) {
-    const idMatch = emailText.match(/id:\s*([\w-]+)/);
-    const approvedMatch = emailText.match(/approved:\s*(true|false)/);
-    const commentMatch = emailText.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/); // Извлечение комментария
+    const idMatch = emailText.match(/id:\s*([\w-]+)/) ?? undefined;
+    const approvedMatch = emailText.match(/approved:\s*(true|false)/) ?? undefined;
+    const commentMatch = emailText.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/) ?? undefined; // Извлечение комментария
 
     const id = idMatch ? idMatch[1].trim() : null;
     const approved = approvedMatch ? approvedMatch[1] === 'true' : null;
@@ -38,19 +38,19 @@ function extractData(emailText) {
 }
 
 
-
 const processEmail = async (email) => {
     try {
         // Используем text или html в зависимости от наличия данных
         let textBody = email.text;
-
+        let parsed;
         if (!textBody && email.html) {
             // Если text отсутствует, используем html и преобразуем его в текст
-            const parsedEmail = await simpleParser(email.html);
-            textBody = parsedEmail.text; // Получаем текстовое представление из HTML
+            const parsedEmail = parseHtmlContent(email.html);
+            parsed = parsedEmail
+            textBody = parsedEmail; // Получаем текстовое представление из HTML
         }
 
-        if (!textBody) return;
+        // if (!textBody) return;
 
         console.log('email_text:', textBody);
 
@@ -64,29 +64,38 @@ const processEmail = async (email) => {
         logEmailParsing({ fromEmail, messageId, comment, approved });
 
         // Отправляем данные на внешний API, если найден id
-        // if (messageId) {
-        const requestBody = {
-            from: fromEmail,
-            id: messageId,
-            approved: approved,
-            comment: comment,
-            email: email
-        };
-        const headers = {
-            Authorization: `Bearer ${externalApi.token}`,
-            'Content-Type': 'application/json',
-        };
+        if (messageId) {
+            const requestBody = {
+                from: fromEmail,
+                id: messageId,
+                approved: approved,
+                comment: comment,
+                email: email,
+                parsed: parsed
+            };
+            const headers = {
+                Authorization: `Bearer ${externalApi.token}`,
+                'Content-Type': 'application/json',
+            };
 
-        logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
+            logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
 
-        await axios.post(externalApi.url, requestBody, { headers });
-        // }
+            await axios.post(externalApi.url, requestBody, { headers });
+        }
     } catch (error) {
         console.error('Failed to process email:', error);
     }
 };
 
+function parseHtmlContent(htmlContent) {
+    // Загрузка HTML с помощью cheerio
+    const $ = cheerio.load(htmlContent);
 
+    // Извлечение текста с учетом разделителей между элементами
+    const textContent = $('body').text().replace(/\s+/g, ' ').trim();
+
+    return textContent;
+}
 
 
 

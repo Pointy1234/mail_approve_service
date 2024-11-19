@@ -1,5 +1,4 @@
 const winston = require('winston');
-const axios = require('axios');
 
 const logger = winston.createLogger({
     level: 'info',
@@ -18,21 +17,6 @@ const logEmailParsing = (parsedEmail) => {
 };
 
 const logExternalApiCall = ({ url, method, headers, body }) => {
-    try{
-
-        let requestBody =
-        {
-            context: {
-                __name: "logs",
-                logs: JSON.stringify(body)
-            }
-        }
-        const headers = {
-            Authorization: `Bearer ${externalApi.token}`
-        }
-        axios.post('https://elma.dev.sberinsur.local/pub/v1/app/testam/logs/create', requestBody, { headers })
-    }
-    catch{}
     logger.info(`External API call made`, { url, method, headers, body });
 };
 

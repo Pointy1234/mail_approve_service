@@ -10,6 +10,7 @@
   "dependencies": {
     "axios": "^1.7.4",
     "body-parser": "^1.20.2",
+    "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
     "email-service": "file:",
     "express": "^4.19.2",

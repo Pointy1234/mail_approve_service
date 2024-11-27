@@ -1,121 +1,148 @@
 const MailNotifier = require('mail-notifier');
-const { simpleParser } = require('mailparser');
 const axios = require('axios');
-const { imap, externalApi } = require('../config/env');
-const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
-const { text } = require('body-parser');
 const cheerio = require('cheerio');
-let notifier;
+const { logEmailParsing, logExternalApiCall } = require('../utils/logger');
+const { externalApi } = require('../config/env');
 
-const createNotifier = () => {
-    return new MailNotifier({
-        user: process.env.IMAP_USER,
-        password: process.env.IMAP_PASS,
-        host: process.env.IMAP_HOST,
-        port: parseInt(process.env.IMAP_PORT, 10),
-        tls: true,
-        tlsOptions: { rejectUnauthorized: false },
-        debug: console.log
-    });
-};
+class EmailNotifier {
+    constructor() {
+        this.notifier = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 10;
+        this.reconnectDelay = 5000; // 5 секунд
+    }
 
+    // Создание экземпляра MailNotifier
+    createNotifier() {
+        return new MailNotifier({
+            user: process.env.IMAP_USER,
+            password: process.env.IMAP_PASS,
+            host: process.env.IMAP_HOST,
+            port: parseInt(process.env.IMAP_PORT, 10),
+            tls: true,
+            tlsOptions: { rejectUnauthorized: false },
+            debug: false,
+            keepalive: true,
+            keepaliveInterval: 10000, // Интервал keep-alive (10 секунд)
+        });
+    }
 
-// Функция для извлечения данных из текста письма
-function extractData(emailText) {
-    const idMatch = emailText.match(/id:\s*([\w-]+)/) ?? undefined;
-    const approvedMatch = emailText.match(/approved:\s*(true|false)/) ?? undefined;
-    const commentMatch = emailText.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/) ?? undefined; // Извлечение комментария
+    // Преобразование HTML-содержимого письма в текст
+    static parseHtmlContent(htmlContent) {
+        try {
+            const $ = cheerio.load(htmlContent);
+            return $('body').text().replace(/\s+/g, ' ').trim();
+        } catch (error) {
+            console.error('Failed to parse HTML content:', error);
+            return null;
+        }
+    }
 
-    const id = idMatch ? idMatch[1].trim() : null;
-    const approved = approvedMatch ? approvedMatch[1] === 'true' : null;
-    const comment = commentMatch ? commentMatch[1].trim() : null; // Текст комментария или null
+    // Извлечение данных из текста письма
+    static extractData(emailText) {
+        try {
+            const idMatch = emailText.match(/id:\s*([\w-]+)/i);
+            const approvedMatch = emailText.match(/approved:\s*(true|false)/i);
+            const commentMatch = emailText.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/i);
 
-    return {
-        comment,
-        id,
-        approved
-    };
-}
+            return {
+                id: idMatch ? idMatch[1].trim() : null,
+                approved: approvedMatch ? approvedMatch[1] === 'true' : null,
+                comment: commentMatch ? commentMatch[1].trim() : null,
+            };
+        } catch (error) {
+            console.error('Failed to extract data from email text:', error);
+            return { id: null, approved: null, comment: null };
+        }
+    }
 
+    // Обработка письма
+    async processEmail(email) {
+        try {
+            let textBody = email.text;
+            if (!textBody && email.html) {
+                textBody = EmailNotifier.parseHtmlContent(email.html);
+            }
 
-const processEmail = async (email) => {
-    try {
-        // Используем text или html в зависимости от наличия данных
-        let textBody = email.text;
-        let parsed;
-        if (!textBody && email.html) {
-            // Если text отсутствует, используем html и преобразуем его в текст
-            const parsedEmail = parseHtmlContent(email.html);
-            parsed = parsedEmail
-            textBody = parsedEmail; // Получаем текстовое представление из HTML
+            if (!textBody) {
+                console.warn('Email text is empty, skipping processing.');
+                return;
+            }
+
+            console.log('Processing email:', textBody);
+
+            const fromEmail = email.from[0]?.address || 'unknown';
+            const { id: messageId, approved, comment } = EmailNotifier.extractData(textBody);
+
+            logEmailParsing({ fromEmail, messageId, approved, comment });
+
+            if (messageId) {
+                const requestBody = { from: fromEmail, id: messageId, approved, comment };
+                const headers = {
+                    Authorization: `Bearer ${externalApi.token}`,
+                    'Content-Type': 'application/json',
+                };
+
+                logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
+                await axios.post(externalApi.url, requestBody, { headers });
+            }
+        } catch (error) {
+            console.error('Failed to process email:', error);
+        }
+    }
+
+    // Запуск MailNotifier
+    startNotifier() {
+        if (this.notifier?.running) {
+            console.log('Stopping existing notifier...');
+            this.notifier.stop();
         }
 
-        // if (!textBody) return;
+        this.notifier = this.createNotifier();
 
-        console.log('email_text:', textBody);
+        this.notifier
+            .on('mail', async (email) => {
+                console.log('New email received, processing...');
+                await this.processEmail(email);
+            })
+            .on('connected', () => {
+                console.log('Notifier connected to IMAP server.');
+                this.reconnectAttempts = 0; // Сбросить счётчик попыток
+            })
+            .on('error', (error) => {
+                console.error('MailNotifier error:', error);
+                this.handleReconnect();
+            })
+            .on('end', () => {
+                console.warn('Notifier disconnected, attempting to reconnect...');
+                this.handleReconnect();
+            })
+            .on('close', (hasError) => {
+                console.warn(`Notifier connection closed${hasError ? ' due to error' : ''}.`);
+                this.handleReconnect();
+            });
 
-        // Извлекаем отправителя
-        const fromEmail = email.from[0].address || 'unknown';
-
-        // Извлекаем данные из текста письма
-        const { comment, id: messageId, approved } = extractData(textBody);
-
-        // Логируем процесс парсинга письма
-        logEmailParsing({ fromEmail, messageId, comment, approved });
-
-        // Отправляем данные на внешний API, если найден id
-        if (messageId) {
-            const requestBody = {
-                from: fromEmail,
-                id: messageId,
-                approved: approved,
-                comment: comment,
-                email: email,
-                parsed: parsed
-            };
-            const headers = {
-                Authorization: `Bearer ${externalApi.token}`,
-                'Content-Type': 'application/json',
-            };
-
-            logExternalApiCall({ url: externalApi.url, method: 'POST', headers, body: requestBody });
-
-            await axios.post(externalApi.url, requestBody, { headers });
-        }
-    } catch (error) {
-        console.error('Failed to process email:', error);
+        console.log('Starting notifier...');
+        this.notifier.start();
     }
-};
 
-function parseHtmlContent(htmlContent) {
-    // Загрузка HTML с помощью cheerio
-    const $ = cheerio.load(htmlContent);
+    // Логика переподключения
+    handleReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error('Maximum reconnect attempts reached. Stopping notifier.');
+            return;
+        }
 
-    // Извлечение текста с учетом разделителей между элементами
-    const textContent = $('body').text().replace(/\s+/g, ' ').trim();
+        if (this.notifier?.running) {
+            this.notifier.stop();
+        }
 
-    return textContent;
+        this.reconnectAttempts += 1;
+        console.log(`Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${this.reconnectDelay / 1000} seconds...`);
+        setTimeout(() => {
+            this.startNotifier();
+        }, this.reconnectDelay);
+    }
 }
 
-
-
-const startNotifier = () => {
-    if (notifier) {
-        notifier.stop();
-    }
-
-    notifier = createNotifier();
-
-    notifier.on('mail', processEmail);
-    notifier.on('error', (error) => {
-        console.error('MailNotifier error:', error);
-    });
-
-    try {
-        notifier.start();
-    } catch (error) {
-        console.error('Failed to start notifier:', error);
-    }
-};
-
-module.exports = { startNotifier, processEmail };
+module.exports = new EmailNotifier();

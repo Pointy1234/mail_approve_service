@@ -10,24 +10,36 @@ class EmailNotifier {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 5000; // 5 секунд
+
+        // Привязка методов для сохранения контекста
+        this.startNotifier = this.startNotifier.bind(this);
+        this.handleReconnect = this.handleReconnect.bind(this);
     }
 
-    // Создание экземпляра MailNotifier
     createNotifier() {
-        return new MailNotifier({
-            user: process.env.IMAP_USER,
-            password: process.env.IMAP_PASS,
-            host: process.env.IMAP_HOST,
-            port: parseInt(process.env.IMAP_PORT, 10),
-            tls: true,
-            tlsOptions: { rejectUnauthorized: false },
-            debug: false,
-            keepalive: true,
-            keepaliveInterval: 10000, // Интервал keep-alive (10 секунд)
-        });
+        if (!process.env.IMAP_USER || !process.env.IMAP_PASS || !process.env.IMAP_HOST || !process.env.IMAP_PORT) {
+            console.error('IMAP environment variables are not set. Check .env configuration.');
+            return null;
+        }
+
+        try {
+            return new MailNotifier({
+                user: process.env.IMAP_USER,
+                password: process.env.IMAP_PASS,
+                host: process.env.IMAP_HOST,
+                port: parseInt(process.env.IMAP_PORT, 10),
+                tls: true,
+                tlsOptions: { rejectUnauthorized: false },
+                debug: false,
+                keepalive: true,
+                keepaliveInterval: 10000, // Интервал keep-alive (10 секунд)
+            });
+        } catch (error) {
+            console.error('Failed to create MailNotifier instance:', error);
+            return null;
+        }
     }
 
-    // Преобразование HTML-содержимого письма в текст
     static parseHtmlContent(htmlContent) {
         try {
             const $ = cheerio.load(htmlContent);
@@ -38,7 +50,6 @@ class EmailNotifier {
         }
     }
 
-    // Извлечение данных из текста письма
     static extractData(emailText) {
         try {
             const idMatch = emailText.match(/id:\s*([\w-]+)/i);
@@ -56,7 +67,6 @@ class EmailNotifier {
         }
     }
 
-    // Обработка письма
     async processEmail(email) {
         try {
             let textBody = email.text;
@@ -91,42 +101,51 @@ class EmailNotifier {
         }
     }
 
-    // Запуск MailNotifier
     startNotifier() {
-        if (this.notifier?.running) {
-            console.log('Stopping existing notifier...');
-            this.notifier.stop();
+        try {
+            if (this.notifier && this.notifier.running) {
+                console.log('Stopping existing notifier...');
+                this.notifier.stop();
+            } else {
+                console.log('Notifier not initialized or not running.');
+            }
+
+            this.notifier = this.createNotifier();
+
+            if (!this.notifier) {
+                console.error('Failed to initialize MailNotifier. Aborting startup.');
+                return;
+            }
+
+            this.notifier
+                .on('mail', async (email) => {
+                    console.log('New email received, processing...');
+                    await this.processEmail(email);
+                })
+                .on('connected', () => {
+                    console.log('Notifier connected to IMAP server.');
+                    this.reconnectAttempts = 0;
+                })
+                .on('error', (error) => {
+                    console.error('MailNotifier error:', error);
+                    this.handleReconnect();
+                })
+                .on('end', () => {
+                    console.warn('Notifier disconnected, attempting to reconnect...');
+                    this.handleReconnect();
+                })
+                .on('close', (hasError) => {
+                    console.warn(`Notifier connection closed${hasError ? ' due to error' : ''}.`);
+                    this.handleReconnect();
+                });
+
+            console.log('Starting notifier...');
+            this.notifier.start();
+        } catch (error) {
+            console.error('Error in startNotifier:', error);
         }
-
-        this.notifier = this.createNotifier();
-
-        this.notifier
-            .on('mail', async (email) => {
-                console.log('New email received, processing...');
-                await this.processEmail(email);
-            })
-            .on('connected', () => {
-                console.log('Notifier connected to IMAP server.');
-                this.reconnectAttempts = 0; // Сбросить счётчик попыток
-            })
-            .on('error', (error) => {
-                console.error('MailNotifier error:', error);
-                this.handleReconnect();
-            })
-            .on('end', () => {
-                console.warn('Notifier disconnected, attempting to reconnect...');
-                this.handleReconnect();
-            })
-            .on('close', (hasError) => {
-                console.warn(`Notifier connection closed${hasError ? ' due to error' : ''}.`);
-                this.handleReconnect();
-            });
-
-        console.log('Starting notifier...');
-        this.notifier.start();
     }
 
-    // Логика переподключения
     handleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.error('Maximum reconnect attempts reached. Stopping notifier.');
@@ -139,9 +158,7 @@ class EmailNotifier {
 
         this.reconnectAttempts += 1;
         console.log(`Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${this.reconnectDelay / 1000} seconds...`);
-        setTimeout(() => {
-            this.startNotifier();
-        }, this.reconnectDelay);
+        setTimeout(this.startNotifier, this.reconnectDelay);
     }
 }
 

@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const defaultConfig = {
     port: 3000,
     smtp: {

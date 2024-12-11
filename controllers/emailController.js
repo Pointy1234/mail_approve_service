@@ -1,10 +1,9 @@
 const nodemailer = require('nodemailer');
 const axios = require('axios');
-const mime = require('mime');
 const crypto = require('crypto');
 const sanitizeHtml = require('sanitize-html');
 const { validationResult, checkSchema } = require('express-validator');
-
+const mime = require('mime');
 // Конфигурация транспортера
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -34,12 +33,6 @@ const validateEmailRequest = checkSchema({
         isString: true,
         errorMessage: 'Main text is required.',
     },
-    download_urls: {
-        in: ['body'],
-        optional: true,
-        isArray: true,
-        errorMessage: 'Download URLs should be an array.',
-    },
 });
 
 // Очистка HTML
@@ -57,8 +50,27 @@ const downloadFile = async (url) => {
     try {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
         const contentType = response.headers['content-type'];
-        const fileExtension = mime.extension(contentType) || 'dat';
-        const fileName = `file_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${fileExtension}`;
+        const contentDisposition = response.headers['content-disposition'];
+        const fileExtension = mime.getExtension(contentType) || 'dat';
+
+        // Extract file name from Content-Disposition header if available
+        let fileName = `file_${Date.now()}`;
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^"]+)(?:"?)/);
+            if (match && match[1]) {
+                fileName = decodeURIComponent(match[1]);
+            }
+        } else {
+            // Extract file name from URL as fallback
+            const urlParts = url.split('/');
+            fileName = urlParts[urlParts.length - 1] || fileName;
+        }
+
+        // Ensure file has the correct extension
+        if (!fileName.includes('.')) {
+            fileName += `.${fileExtension}`;
+        }
+
         const fileBuffer = Buffer.from(response.data, 'binary');
 
         return { filename: fileName, content: fileBuffer };
@@ -77,13 +89,24 @@ exports.sendEmail = [
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { recipient, subject, mainText, download_urls } = req.body;
+        const { recipient, subject, mainText, download_urls, id} = req.body;
 
         try {
             // Очистка входных данных
             const sanitizedSubject = sanitizeHtml(subject || 'Уведомление', sanitizeOptions);
-            const sanitizedMainText = sanitizeHtml(mainText, sanitizeOptions);
-
+            let sanitizedMainText = sanitizeHtml(mainText, sanitizeOptions);
+            sanitizedMainText += `<p>
+    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ согласован.<br>Комментарий:   <br><span style='display:none;'>id: ${id}<br>approved: true</span>"
+       style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+       Согласовать
+    </a>
+</p>
+<p>
+    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ требует доработок.<br>Комментарий:   <br><span style='display:none;'>id: ${id}<br>approved: false</span>"
+       style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+       Отправить замечания Инициатору
+    </a>
+</p>`
             // Параллельная загрузка файлов
             const attachments = download_urls
                 ? await Promise.all(download_urls.map((url) => downloadFile(url)))

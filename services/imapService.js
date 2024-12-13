@@ -93,16 +93,33 @@ class EmailNotifier {
 
     /** Извлекает данные из текста письма */
     static extractDataFromEmail(text) {
-        const idMatch = text.match(/id:\s*([\w-]+)/i);
-        const approvedMatch = text.match(/approved:\s*(true|false)/i);
-        const commentMatch = text.match(/Комментарий:\s*(.*?)(?=\s*id:|$)/i);
-
+        console.log(text)
+        // Извлекаем URL из текста письма
+        const urlMatch = text.match(/href="([^"]+)"/i);
+        
+        if (!urlMatch) {
+            return { id: null, approved: null, comment: null };
+        }
+    
+        // Извлекаем параметры из URL
+        const urlParams = new URLSearchParams(urlMatch[1].split('?')[1]);
+    
+        // Получаем id и approved из URL-параметров
+        const id = urlParams.get('id');
+        const approved = urlParams.get('approved');
+    
+        // Извлекаем тело письма (Комментарий)
+        const bodyMatch = urlParams.get('body');
+        const comment = bodyMatch ? decodeURIComponent(bodyMatch).replace('%0A', '\n') : null;
+    
         return {
-            id: idMatch ? idMatch[1].trim() : null,
-            approved: approvedMatch ? approvedMatch[1] === 'true' : null,
-            comment: commentMatch ? commentMatch[1].trim() : null,
+            id: id ? id.trim() : null,
+            approved: approved === 'true' ? true : (approved === 'false' ? false : null),
+            comment: comment ? comment.trim() : null,
         };
     }
+    
+    
 
     /** Отправляет данные на внешний API */
     async sendToApi(emailData) {
@@ -134,7 +151,7 @@ class EmailNotifier {
         }
 
         const fromEmail = email.from[0]?.address || 'unknown';
-        const extractedData = EmailNotifier.extractDataFromEmail(textBody);
+        const extractedData = EmailNotifier.extractDataFromEmail(email);
         const emailData = { fromEmail, ...extractedData };
 
         logEmailParsing(emailData);

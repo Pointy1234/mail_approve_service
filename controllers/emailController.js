@@ -11,10 +11,17 @@ const transporter = nodemailer.createTransport({
     secure: process.env.SMTP_SECURE === 'true', // true для 465, false для других портов
     auth: {
         user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-    },
+        pass: process.env.SMTP_PASS,
+    }
 });
 
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('SMTP Server Verification Error:', error.message);
+    } else {
+        console.log('SMTP Server is ready:', success);
+    }
+});
 // Валидация входных данных
 const validateEmailRequest = checkSchema({
     recipient: {
@@ -49,27 +56,32 @@ const sanitizeOptions = {
 const downloadFile = async (url) => {
     try {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
-        const contentType = response.headers['content-type'];
-        const contentDisposition = response.headers['content-disposition'];
-        const fileExtension = mime.getExtension(contentType) || 'dat';
 
-        // Extract file name from Content-Disposition header if available
-        let fileName = `file_${Date.now()}`;
-        if (contentDisposition) {
-            const match = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^"]+)(?:"?)/);
-            if (match && match[1]) {
-                fileName = decodeURIComponent(match[1]);
-            }
+        const urlParams = new URLSearchParams(url.split('?')[1]);
+        const contentDispositionParam = urlParams.get('response-content-disposition');
+
+        if (!contentDispositionParam) {
+            throw new Error("Parameter 'response-content-disposition' is missing in the URL");
+        }
+
+        // Попытка извлечь имя файла из параметра filename* (приоритет UTF-8)
+        let fileName = `file_${Date.now()}`; // Имя по умолчанию
+        const matchUtf8 = contentDispositionParam.match(/filename\*=(?:UTF-8'')?([^;]+)/);
+        if (matchUtf8 && matchUtf8[1]) {
+            fileName = decodeURIComponent(matchUtf8[1]);
         } else {
-            // Extract file name from URL as fallback
-            const urlParts = url.split('/');
-            fileName = urlParts[urlParts.length - 1] || fileName;
+            // Попытка извлечь имя файла из обычного filename=
+            const matchRegular = contentDispositionParam.match(/filename="([^"]+)"/);
+            if (matchRegular && matchRegular[1]) {
+                fileName = matchRegular[1];
+            }
         }
 
-        // Ensure file has the correct extension
+        // Убедиться, что файл имеет расширение
         if (!fileName.includes('.')) {
-            fileName += `.${fileExtension}`;
+            fileName += '.dat'; // Подставляем дефолтное расширение
         }
+
 
         const fileBuffer = Buffer.from(response.data, 'binary');
 
@@ -80,6 +92,8 @@ const downloadFile = async (url) => {
     }
 };
 
+
+
 // Основная функция отправки email
 exports.sendEmail = [
     validateEmailRequest,
@@ -89,24 +103,29 @@ exports.sendEmail = [
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { recipient, subject, mainText, download_urls, id} = req.body;
+        const { recipient, subject, mainText, download_urls, id } = req.body;
 
         try {
             // Очистка входных данных
             const sanitizedSubject = sanitizeHtml(subject || 'Уведомление', sanitizeOptions);
             let sanitizedMainText = sanitizeHtml(mainText, sanitizeOptions);
             sanitizedMainText += `<p>
-    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ согласован.<br>Комментарий:   <br><span style='display:none;'>id: ${id}<br>approved: true</span>"
+    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ согласован.%0AКомментарий:   
+    %0A%0A%0A%0A%0A%0Aid=${id}
+    %0Aapproved=true"
        style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
        Согласовать
     </a>
 </p>
 <p>
-    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ требует доработок.<br>Комментарий:   <br><span style='display:none;'>id: ${id}<br>approved: false</span>"
+    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ требует доработок.%0AКомментарий:
+    %0A%0A%0A%0A%0A%0A%0Aid=${id}
+    %0Aapproved=false"
        style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
        Отправить замечания Инициатору
     </a>
-</p>`
+</p>
+`
             // Параллельная загрузка файлов
             const attachments = download_urls
                 ? await Promise.all(download_urls.map((url) => downloadFile(url)))

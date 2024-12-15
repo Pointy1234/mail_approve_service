@@ -110,22 +110,43 @@ exports.sendEmail = [
             const sanitizedSubject = sanitizeHtml(subject || 'Уведомление', sanitizeOptions);
             let sanitizedMainText = sanitizeHtml(mainText, sanitizeOptions);
             sanitizedMainText += `<p>
-    <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ согласован.%0AКомментарий:   
-    %0A%0A%0A%0A%0A%0Aid=${id}
-    %0Aapproved=true"
-       style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
-       Согласовать
-    </a>
-</p>
-<p>
-    <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ требует доработок.%0AКомментарий:
-    %0A%0A%0A%0A%0A%0A%0Aid=${id}
-    %0Aapproved=false"
-       style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
-       Отправить замечания Инициатору
-    </a>
-</p>
-`
+            <a href="mailto:${process.env.SMTP_USER}?subject=Согласование&body=Документ согласован.
+            <br>
+            <b>Комментарий:</b>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+            <hr>%0A%0A%0A<span style='color: red;'>Не удаляйте текст ниже. При отсутствии текста ниже, задача не будет закрыта</span>
+            <br>
+            id=${id}
+            <br>
+            approved=true"
+               style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+               Согласовать
+            </a>
+        </p>
+        <p>
+            <a href="mailto:${process.env.SMTP_USER}?subject=Замечания по документу&body=Документ требует доработок.
+        <br>
+            <b>Комментарий:</b>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br> 
+            <hr>%0A%0A%0A<span style='color: red;'>Не удаляйте текст ниже. При отсутствии текста ниже, задача не будет закрыта</span>
+            <br>
+            id=${id}
+            <br>
+            approved=false"
+               style="background-color: #add8e6; color: black; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+               Отправить замечания Инициатору
+            </a>
+        </p>`;
+
+
             // Параллельная загрузка файлов
             const attachments = download_urls
                 ? await Promise.all(download_urls.map((url) => downloadFile(url)))

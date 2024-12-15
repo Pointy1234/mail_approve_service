@@ -93,31 +93,22 @@ class EmailNotifier {
 
     /** Извлекает данные из текста письма */
     static extractDataFromEmail(text) {
-        console.log(text)
-        // Извлекаем URL из текста письма
-        const urlMatch = text.match(/href="([^"]+)"/i);
+        // Поиск id
+        const idMatch = text.match(/id=([\w-]+)/); 
         
-        if (!urlMatch) {
-            return { id: null, approved: null, comment: null };
-        }
-    
-        // Извлекаем параметры из URL
-        const urlParams = new URLSearchParams(urlMatch[1].split('?')[1]);
-    
-        // Получаем id и approved из URL-параметров
-        const id = urlParams.get('id');
-        const approved = urlParams.get('approved');
-    
-        // Извлекаем тело письма (Комментарий)
-        const bodyMatch = urlParams.get('body');
-        const comment = bodyMatch ? decodeURIComponent(bodyMatch).replace('%0A', '\n') : null;
+        // Поиск approved
+        const approvedMatch = text.match(/approved=(true|false)/); 
+        
+        // Поиск комментария (если есть)
+        const commentMatch = text.match(/Комментарий:\n([\s\S]*?)\n-{5,}/); // или другой разделитель, если нужен
     
         return {
-            id: id ? id.trim() : null,
-            approved: approved === 'true' ? true : (approved === 'false' ? false : null),
-            comment: comment ? comment.trim() : null,
+            id: idMatch ? idMatch[1].trim() : null,  // id, если найдено
+            approved: approvedMatch ? approvedMatch[1] === 'true' : null,  // approved, если найдено
+            comment: commentMatch ? commentMatch[1].trim() : null,  // комментарий, если найдено
         };
     }
+    
     
     
 
@@ -151,7 +142,7 @@ class EmailNotifier {
         }
 
         const fromEmail = email.from[0]?.address || 'unknown';
-        const extractedData = EmailNotifier.extractDataFromEmail(email);
+        const extractedData = EmailNotifier.extractDataFromEmail(textBody);
         const emailData = { fromEmail, ...extractedData };
 
         logEmailParsing(emailData);
